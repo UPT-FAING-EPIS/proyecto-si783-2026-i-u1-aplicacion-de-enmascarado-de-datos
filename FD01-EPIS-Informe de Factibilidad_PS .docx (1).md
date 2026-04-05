@@ -62,12 +62,11 @@ Integrantes:
 
 **1.1. Nombre del proyecto**
 
-Sistema de Enmascaramiento y Control de Acceso a Datos Sensibles. (Puedes ajustarlo si ya tienen un nombre oficial para la aplicación)
+Emask
 
 **1.2. Duración del proyecto**
 
-16 semanas. (Puse 16 semanas asumiendo que es lo que dura el semestre académico. Cámbialo a meses o semanas exactas según lo que les haya indicado el profesor).
-
+16 semanas
 **1.3. Descripción**
 
 El presente proyecto consiste en el desarrollo de una aplicación orientada al enmascaramiento de datos sensibles en bases de datos, con el objetivo de mejorar la seguridad y el control de acceso a la información. La solución permitirá que los usuarios visualicen únicamente los datos que les corresponden según su rol o área, aplicando técnicas como seguridad a nivel de fila, enmascaramiento dinámico y auditoría de accesos.
