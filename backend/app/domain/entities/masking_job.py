@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -8,6 +8,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    UNMASKED = "unmasked"
 
 class MaskingJob(BaseModel):
     id: Optional[str] = None
@@ -19,5 +20,6 @@ class MaskingJob(BaseModel):
     error_message: Optional[str] = None
     records_processed: int = 0
     owner_id: Optional[str] = None
+    shared_with: List[str] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

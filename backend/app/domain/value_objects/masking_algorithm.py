@@ -6,3 +6,5 @@ class MaskingAlgorithm(str, Enum):
     HASHING = "hashing"
     REDACTION = "redaction"
     NULLIFICATION = "nullification"
+    FPE = "fpe"
+    PERTURBATION = "perturbation"

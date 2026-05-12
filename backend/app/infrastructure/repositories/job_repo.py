@@ -16,12 +16,7 @@ class MongoJobRepository(JobRepository):
         self.collection = self.db["jobs"]
 
     async def _serialize(self, entity: MaskingJob) -> Dict[str, Any]:
-        data = entity.model_dump()
-        return {
-            **data,
-            "started_at": data["started_at"].isoformat() if data["started_at"] else None,
-            "completed_at": data["completed_at"].isoformat() if data["completed_at"] else None,
-        }
+        return entity.model_dump(mode="json")
 
     async def create(self, entity: MaskingJob) -> MaskingJob:
         entity_dict = await self._serialize(entity)
@@ -33,13 +28,19 @@ class MongoJobRepository(JobRepository):
         data = await self.collection.find_one({"id": id})
         if not data:
             return None
-        return MaskingJob(**data)
+        try:
+            return MaskingJob(**data)
+        except Exception:
+            return None
 
     async def get_all(self) -> List[MaskingJob]:
         results = []
         cursor = self.collection.find({})
         async for doc in cursor:
-            results.append(MaskingJob(**doc))
+            try:
+                results.append(MaskingJob(**doc))
+            except Exception as e:
+                print(f"Skipping invalid job record {doc.get('id', 'unknown')}: {e}")
         return results
 
     async def update(self, id: str, entity: MaskingJob) -> Optional[MaskingJob]:

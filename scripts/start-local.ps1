@@ -32,12 +32,7 @@ if (-not (Test-Path (Join-Path $Frontend "node_modules"))) {
 }
 
 Write-Host "Iniciando backend en :8000 ..." -ForegroundColor Cyan
-$backendCmd = @"
-Set-Location '$Backend'
-. '.venv\Scripts\Activate.ps1'
-Write-Host 'Enmask API → http://127.0.0.1:8000/docs' -ForegroundColor Green
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-"@
+$backendCmd = "Set-Location '$Backend'; . '.venv\Scripts\Activate.ps1'; Write-Host 'Enmask API -> http://127.0.0.1:8000/docs' -ForegroundColor Green; uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $shellExe = if ($pwsh) { $pwsh.Source } else { "powershell" }
 Start-Process -FilePath $shellExe -ArgumentList "-NoExit", "-Command", $backendCmd
@@ -45,11 +40,7 @@ Start-Process -FilePath $shellExe -ArgumentList "-NoExit", "-Command", $backendC
 Start-Sleep -Seconds 2
 
 Write-Host "Iniciando frontend en :5173 ..." -ForegroundColor Cyan
-$frontendCmd = @"
-Set-Location '$Frontend'
-Write-Host 'Enmask UI → http://localhost:5173' -ForegroundColor Green
-npm run dev
-"@
+$frontendCmd = "Set-Location '$Frontend'; Write-Host 'Enmask UI -> http://localhost:5173' -ForegroundColor Green; npm run dev"
 Start-Process -FilePath $shellExe -ArgumentList "-NoExit", "-Command", $frontendCmd
 
 Write-Host ""

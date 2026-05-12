@@ -15,7 +15,7 @@ class MongoDBConnectionRepository(ConnectionRepository):
         self.collection = self.db["connections"]
 
     async def create(self, entity: ConnectionConfig) -> ConnectionConfig:
-        entity_dict = entity.model_dump()
+        entity_dict = entity.model_dump(mode="json")
         entity_dict["id"] = entity_dict.get("id") or str(uuid.uuid4())
         db_doc = entity_dict.copy()
         db_doc["additional_options"] = json.dumps(db_doc.get("additional_options") or {})
@@ -26,19 +26,27 @@ class MongoDBConnectionRepository(ConnectionRepository):
         data = await self.collection.find_one({"id": id})
         if not data:
             return None
-        data["additional_options"] = json.loads(data.get("additional_options", "{}"))
-        return ConnectionConfig(**data)
+        try:
+            raw_options = data.get("additional_options")
+            data["additional_options"] = json.loads(raw_options) if raw_options else {}
+            return ConnectionConfig(**data)
+        except Exception:
+            return None
 
     async def get_all(self) -> List[ConnectionConfig]:
         cursor = self.collection.find({})
         records = []
         async for doc in cursor:
-            doc["additional_options"] = json.loads(doc.get("additional_options", "{}"))
-            records.append(ConnectionConfig(**doc))
+            try:
+                raw_options = doc.get("additional_options")
+                doc["additional_options"] = json.loads(raw_options) if raw_options else {}
+                records.append(ConnectionConfig(**doc))
+            except Exception as e:
+                print(f"Skipping invalid connection record {doc.get('id', 'unknown')}: {e}")
         return records
 
     async def update(self, id: str, entity: ConnectionConfig) -> Optional[ConnectionConfig]:
-        entity_dict = entity.model_dump()
+        entity_dict = entity.model_dump(mode="json")
         db_doc = entity_dict.copy()
         db_doc["additional_options"] = json.dumps(db_doc.get("additional_options") or {})
         result = await self.collection.update_one({"id": id}, {"$set": db_doc})

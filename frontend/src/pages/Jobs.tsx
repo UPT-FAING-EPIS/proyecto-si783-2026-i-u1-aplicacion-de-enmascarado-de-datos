@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { getJobs, createJob, runJob, getJob, getConnections, getRules } from '../services/api';
-import type { MaskingJob, JobCreate, Connection, MaskingRule, JobStatus } from '../types';
+import { getJobs, createJob, runJob, unmaskJob, getJob, getConnections, getRules, queryJob, shareJob, getAuditLog } from '../services/api';
+import type { MaskingJob, JobCreate, Connection, MaskingRule, JobStatus, AuditLogEntry } from '../types';
 import type { ToastType } from '../hooks/useToast';
+import { useAuth } from '../hooks/useAuth';
 
 interface Props { addToast: (msg: string, type?: ToastType) => void; }
 
@@ -10,6 +11,7 @@ const statusBadge: Record<JobStatus, string> = {
   running:   'badge-warning',
   completed: 'badge-success',
   failed:    'badge-danger',
+  unmasked:  'badge-info',
 };
 
 function formatDate(d: string | null) {
@@ -18,6 +20,7 @@ function formatDate(d: string | null) {
 }
 
 export default function Jobs({ addToast }: Props) {
+  const { user } = useAuth();
   const [jobs, setJobs] = useState<MaskingJob[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [rules, setRules] = useState<MaskingRule[]>([]);
@@ -27,6 +30,26 @@ export default function Jobs({ addToast }: Props) {
   const [selectedRules, setSelectedRules] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState<Set<string>>(new Set());
+  
+  // DDM Preview state with mask toggle
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewData, setPreviewData] = useState<Record<string, unknown>[]>([]);
+  const [previewIsMasked, setPreviewIsMasked] = useState<boolean>(false);
+  const [previewingJob, setPreviewingJob] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewMaskPreference, setPreviewMaskPreference] = useState<boolean>(true); // true = masked by default
+
+  // Share state
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareEmail, setShareEmail] = useState('');
+  const [sharingJob, setSharingJob] = useState<MaskingJob | null>(null);
+  const [sharing, setSharing] = useState(false);
+
+  // Audit state
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditingJob, setAuditingJob] = useState<string | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,6 +112,99 @@ export default function Jobs({ addToast }: Props) {
     }
   };
 
+  const handleUnmask = async (job: MaskingJob) => {
+    setRunning(prev => new Set(prev).add(job.id));
+    try {
+      await unmaskJob(job.id);
+      addToast('Job unmasking started in background', 'info');
+      const poll = async () => {
+        const updated = await getJob(job.id);
+        setJobs(prev => prev.map(j => j.id === job.id ? updated : j));
+        if (updated.status === 'completed' || updated.status === 'running' || updated.status === 'pending') {
+          setTimeout(poll, 2000);
+        } else {
+          setRunning(prev => { const s = new Set(prev); s.delete(job.id); return s; });
+          if (updated.status === 'unmasked')
+            addToast(`Job unmasked successfully`, 'success');
+          else if (updated.status === 'failed')
+            addToast(`Unmask failed: ${updated.error_message}`, 'error');
+        }
+      };
+      setTimeout(poll, 1500);
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to unmask job', 'error');
+      setRunning(prev => { const s = new Set(prev); s.delete(job.id); return s; });
+    }
+  };
+  const handlePreview = async (jobId: string) => {
+    setPreviewingJob(jobId);
+    setShowPreviewModal(true);
+    setPreviewLoading(true);
+    setPreviewData([]);
+    setPreviewMaskPreference(true); // Default: show masked
+    
+    try {
+      const response = await queryJob(jobId, true); // Default to masked
+      setPreviewData(response.data || []);
+      setPreviewIsMasked(response.is_masked);
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to query data', 'error');
+      setShowPreviewModal(false);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleToggleMasking = async () => {
+    if (!previewingJob) return;
+    setPreviewLoading(true);
+    try {
+      const newMaskPref = !previewMaskPreference;
+      const response = await queryJob(previewingJob, newMaskPref);
+      setPreviewData(response.data || []);
+      setPreviewIsMasked(response.is_masked);
+      setPreviewMaskPreference(newMaskPref);
+      addToast(`Data ${newMaskPref ? 'masked' : 'unmasked'}`, 'info');
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to toggle masking', 'error');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleShareSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sharingJob || !shareEmail) return;
+    setSharing(true);
+    try {
+      await shareJob(sharingJob.id, shareEmail);
+      addToast(`Job shared with ${shareEmail}`, 'success');
+      setShareEmail('');
+      setShowShareModal(false);
+      load();
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to share job', 'error');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleShowAudit = async (jobId: string) => {
+    setAuditingJob(jobId);
+    setShowAuditModal(true);
+    setAuditLoading(true);
+    setAuditLogs([]);
+    try {
+      const logs = await getAuditLog(jobId);
+      setAuditLogs(logs);
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to load audit logs', 'error');
+      setShowAuditModal(false);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   return (
     <div className="page-content">
       <div className="card">
@@ -136,16 +252,55 @@ export default function Jobs({ addToast }: Props) {
                     <td style={{ fontSize: 12 }}>{formatDate(j.started_at)}</td>
                     <td style={{ fontSize: 12 }}>{formatDate(j.completed_at)}</td>
                     <td>
-                      {(j.status === 'pending' || j.status === 'failed') && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {j.status !== 'running' && (
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                            onClick={() => handleRun(j)}
+                            disabled={running.has(j.id)}
+                            title="Run Masking"
+                          >
+                            {running.has(j.id) ? '⌛' : '▶ Run'}
+                          </button>
+                        )}
+                        {j.status === 'completed' && (
+                          <button
+                            className="btn btn-warning"
+                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                            onClick={() => handleUnmask(j)}
+                            disabled={running.has(j.id)}
+                            title="Restore Original Data"
+                          >
+                            {running.has(j.id) ? '⌛' : '↺ Unmask'}
+                          </button>
+                        )}
                         <button
-                          id={`btn-run-job-${j.id}`}
-                          className="btn btn-success"
-                          disabled={running.has(j.id)}
-                          onClick={() => handleRun(j)}
+                          className="btn btn-secondary"
+                          onClick={() => handlePreview(j.id)}
+                          title="Query as normal user (Dynamic Data Masking)"
                         >
-                          {running.has(j.id) ? <><span className="spinner" /> Running…</> : '▶ Run'}
+                          👁 Query DDM
                         </button>
-                      )}
+                        {(user?.id === j.owner_id) && (
+                          <>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => { setSharingJob(j); setShowShareModal(true); }}
+                              title="Share with other users"
+                            >
+                              👥 Share
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handleShowAudit(j.id)}
+                              title="View audit logs"
+                            >
+                              📋 Audit Log
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -211,6 +366,145 @@ export default function Jobs({ addToast }: Props) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showPreviewModal && previewingJob && (
+        <div className="modal-overlay" onClick={() => setShowPreviewModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
+            <div className="modal-header">
+              <h2>Dynamic Query Preview</h2>
+              <button className="modal-close" onClick={() => setShowPreviewModal(false)}>×</button>
+            </div>
+            <div style={{ padding: '0 24px' }}>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+                <span className={`badge ${previewIsMasked ? 'badge-warning' : 'badge-success'}`}>
+                  {previewIsMasked ? '🔒 Data is Masked (User)' : '🔓 Data is Unmasked (Owner/Admin)'}
+                </span>
+              </div>
+              
+              {previewLoading ? (
+                <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+              ) : previewData.length === 0 ? (
+                <div className="empty-state">
+                  <p>No records found.</p>
+                </div>
+              ) : (
+                <div className="table-wrapper" style={{ maxHeight: '400px', overflow: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        {Object.keys(previewData[0]).map(k => (
+                          <th key={k}>{k}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewData.map((row, i) => (
+                        <tr key={i}>
+                          {Object.values(row).map((v, j) => (
+                            <td key={j}>{String(v)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary" 
+                onClick={handleToggleMasking}
+                disabled={previewLoading || previewData.length === 0}
+              >
+                {previewMaskPreference ? '🔒 Hide Masking' : '👁 Apply Masking'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowPreviewModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShareModal && sharingJob && (
+        <div className="modal-overlay" onClick={() => setShowShareModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Share Job</h2>
+              <button className="modal-close" onClick={() => setShowShareModal(false)}>×</button>
+            </div>
+            <form onSubmit={handleShareSubmit}>
+              <div className="form-group" style={{ padding: '0 24px' }}>
+                <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                  Users you share this job with will be able to query it, but they will only see <strong>masked data</strong>.
+                </p>
+                <label>User Email</label>
+                <input
+                  type="email"
+                  value={shareEmail}
+                  onChange={e => setShareEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  required
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowShareModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={sharing}>
+                  {sharing ? <><span className="spinner" />Sharing…</> : 'Share'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showAuditModal && auditingJob && (
+        <div className="modal-overlay" onClick={() => setShowAuditModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
+            <div className="modal-header">
+              <h2>Audit Log</h2>
+              <button className="modal-close" onClick={() => setShowAuditModal(false)}>×</button>
+            </div>
+            <div style={{ padding: '0 24px' }}>
+              {auditLoading ? (
+                <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+              ) : auditLogs.length === 0 ? (
+                <div className="empty-state">
+                  <p>No queries have been made yet.</p>
+                </div>
+              ) : (
+                <div className="table-wrapper" style={{ maxHeight: '400px', overflow: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>User Email</th>
+                        <th>Action</th>
+                        <th>Data Masked?</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map(log => (
+                        <tr key={log.id}>
+                          <td>{formatDate(log.timestamp)}</td>
+                          <td>{log.user_email}</td>
+                          <td>{log.action}</td>
+                          <td>
+                            <span className={`badge ${log.is_masked ? 'badge-warning' : 'badge-success'}`}>
+                              {log.is_masked ? 'Yes (Masked)' : 'No (Original)'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowAuditModal(false)}>Close</button>
+            </div>
           </div>
         </div>
       )}

@@ -8,7 +8,7 @@ from app.application.services.connection_service import ConnectionService
 from app.application.services.job_orchestrator import JobOrchestrator
 from app.application.services.masking_service import MaskingService
 from app.domain.entities.user import User
-from app.domain.interfaces.repository import ConnectionRepository, JobRepository, RuleRepository, UserRepository
+from app.domain.interfaces.repository import ConnectionRepository, JobRepository, RuleRepository, UserRepository, AuditLogRepository
 from app.infrastructure.repositories.job_repo import MongoJobRepository
 from app.infrastructure.repositories.mongodb_connection_repo import MongoDBConnectionRepository
 from app.infrastructure.repositories.memory_repository import (
@@ -18,9 +18,13 @@ from app.infrastructure.repositories.memory_repository import (
 )
 from app.infrastructure.repositories.postgres_connection_repo import PostgresConnectionRepository
 from app.infrastructure.repositories.user_repository import user_repository
+from app.infrastructure.repositories.mongo_user_repo import MongoUserRepository
+from app.infrastructure.repositories.audit_repo import MongoAuditRepository
+from app.domain.interfaces.vault_repository import VaultRepository
+from app.infrastructure.repositories.vault_repo import MongoVaultRepository, memory_vault_repository
 
 
-def get_connection_repository() -> ConnectionRepository:
+async def get_connection_repository() -> ConnectionRepository:
     if settings.REPOSITORY_BACKEND == "postgres":
         return PostgresConnectionRepository(settings.POSTGRES_META_DSN)
     if settings.REPOSITORY_BACKEND == "mongodb":
@@ -28,46 +32,65 @@ def get_connection_repository() -> ConnectionRepository:
     return connection_repository
 
 
-def get_rule_repository() -> RuleRepository:
+async def get_rule_repository() -> RuleRepository:
     return rule_repository
 
 
-def get_job_repository() -> JobRepository:
+async def get_job_repository() -> JobRepository:
     if settings.REPOSITORY_BACKEND == "mongodb":
         return MongoJobRepository(settings.MONGODB_META_URI, settings.METADATA_DATABASE)
     return job_repository
 
 
-def get_user_repository() -> UserRepository:
+async def get_user_repository() -> UserRepository:
+    if settings.REPOSITORY_BACKEND == "mongodb":
+        return MongoUserRepository(settings.MONGODB_META_URI, settings.METADATA_DATABASE)
     return user_repository
 
 
-def get_connection_service(
+async def get_audit_repository() -> AuditLogRepository:
+    if settings.REPOSITORY_BACKEND == "mongodb":
+        return MongoAuditRepository(settings.MONGODB_META_URI, settings.METADATA_DATABASE)
+    return None
+
+
+async def get_vault_repository() -> VaultRepository:
+    if settings.REPOSITORY_BACKEND == "mongodb":
+        return MongoVaultRepository(settings.MONGODB_META_URI, settings.METADATA_DATABASE)
+    return memory_vault_repository
+
+async def get_connection_service(
     repository: ConnectionRepository = Depends(get_connection_repository),
 ) -> ConnectionService:
     return ConnectionService(repository)
 
 
-def get_masking_service(
+async def get_masking_service(
     repository: RuleRepository = Depends(get_rule_repository),
     connection_repository: ConnectionRepository = Depends(get_connection_repository),
 ) -> MaskingService:
     return MaskingService(repository, connection_repository)
 
 
-def get_job_orchestrator(
+async def get_job_orchestrator(
     connection_repository: ConnectionRepository = Depends(get_connection_repository),
     rule_repository: RuleRepository = Depends(get_rule_repository),
     job_repository: JobRepository = Depends(get_job_repository),
+    audit_repository: AuditLogRepository = Depends(get_audit_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+    vault_repository: VaultRepository = Depends(get_vault_repository),
 ) -> JobOrchestrator:
     return JobOrchestrator(
         connection_repository=connection_repository,
         rule_repository=rule_repository,
         job_repository=job_repository,
+        audit_repository=audit_repository,
+        user_repository=user_repository,
+        vault_repository=vault_repository,
     )
 
 
-def get_auth_service(
+async def get_auth_service(
     repository: UserRepository = Depends(get_user_repository),
 ) -> AuthService:
     return AuthService(repository)
@@ -103,11 +126,7 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
 
 def require_role(role: str):
     async def dependency(user: User = Depends(get_current_active_user)) -> User:
-        if user.role != role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User does not have the required role.",
-            )
+        # Roles were removed — keep this dependency for compatibility but do not enforce role checks.
         return user
     return dependency
 

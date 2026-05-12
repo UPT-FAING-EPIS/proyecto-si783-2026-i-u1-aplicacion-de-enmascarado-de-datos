@@ -5,6 +5,7 @@ from app.domain.entities.connection import ConnectionConfig
 from app.domain.entities.masking_job import MaskingJob
 from app.domain.entities.masking_rule import MaskingRule
 from app.domain.entities.user import User
+from app.domain.entities.audit_log import AuditLog
 
 T = TypeVar("T")
 
@@ -41,6 +42,12 @@ class RuleRepository(Repository[MaskingRule], ABC):
 
 class JobRepository(Repository[MaskingJob], ABC):
     pass
+
+
+class AuditLogRepository(Repository[AuditLog], ABC):
+    @abstractmethod
+    async def get_by_job_id(self, job_id: str) -> List[AuditLog]:
+        pass
 
 
 class UserRepository(Repository[User], ABC):

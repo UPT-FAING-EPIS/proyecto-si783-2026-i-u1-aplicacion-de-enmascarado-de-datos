@@ -23,7 +23,7 @@ _DEFAULT_CORS_ORIGINS = (
 # Vite en LAN (Network): http://192.168.x.x:5173 — no está en la lista fija de arriba.
 _DEFAULT_CORS_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|0\.0\.0\.0):(5173|4173|3000)$"
+    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|0\.0\.0\.0):\d{1,5}$"
 )
 
 
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     POSTGRES_META_DSN: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/enmask_meta"
     MONGODB_META_URI: str = "mongodb://mongodb:27017"
     METADATA_DATABASE: str = "enmask_meta"
+    GOOGLE_CLIENT_ID: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 

@@ -26,3 +26,20 @@ class PostgresClient:
         async with self.engine.connect() as conn:
             await conn.execute(query, parameters)
             await conn.commit()
+
+    async def get_schema(self) -> Dict[str, List[str]]:
+        query = """
+            SELECT table_name, column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public'
+        """
+        records = await self.fetch_all(query)
+        schema = {}
+        for record in records:
+            t = record["table_name"]
+            c = record["column_name"]
+            if t not in schema:
+                schema[t] = []
+            schema[t].append(c)
+        return schema
+

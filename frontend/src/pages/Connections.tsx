@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getConnections, createConnection, deleteConnection } from '../services/api';
-import type { Connection, ConnectionCreate } from '../types';
+import { getConnections, createConnection, deleteConnection, discoverPii, createRule } from '../services/api';
+import type { Connection, ConnectionCreate, RuleCreate } from '../types';
 import type { ToastType } from '../hooks/useToast';
 
 interface Props {
@@ -19,6 +19,13 @@ export default function Connections({ addToast }: Props) {
   const [form, setForm] = useState<ConnectionCreate>(defaultForm);
   const [saving, setSaving] = useState(false);
 
+  // Discover PII state
+  const [showDiscoverModal, setShowDiscoverModal] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [suggestions, setSuggestions] = useState<RuleCreate[]>([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<number[]>([]);
+  const [creatingSuggestions, setCreatingSuggestions] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try { setConnections(await getConnections()); }
@@ -29,7 +36,10 @@ export default function Connections({ addToast }: Props) {
   useEffect(() => { load(); }, []);
 
   const handleTypeChange = (t: ConnectionCreate['type']) => {
-    setForm(prev => ({ ...prev, type: t, port: t === 'postgres' ? 5432 : 27017 }));
+    let port = 5432;
+    if (t === 'mongodb') port = 27017;
+    if (t === 'mysql') port = 3306;
+    setForm(prev => ({ ...prev, type: t, port }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,6 +65,46 @@ export default function Connections({ addToast }: Props) {
       addToast(`Connection "${name}" deleted`, 'success');
       load();
     } catch { addToast('Failed to delete connection', 'error'); }
+  };
+
+  const handleDiscover = async (id: string) => {
+    setDiscovering(true);
+    setShowDiscoverModal(true);
+    setSuggestions([]);
+    setSelectedSuggestions([]);
+    try {
+      const data = await discoverPii(id);
+      setSuggestions(data);
+      setSelectedSuggestions(data.map((_, idx) => idx)); // select all by default
+      if (data.length === 0) {
+        addToast('No PII columns detected', 'info');
+      }
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Discovery failed', 'error');
+      setShowDiscoverModal(false);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const toggleSuggestion = (idx: number) => {
+    setSelectedSuggestions(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]);
+  };
+
+  const handleCreateSuggestions = async () => {
+    setCreatingSuggestions(true);
+    try {
+      const selectedRules = selectedSuggestions.map(idx => suggestions[idx]);
+      for (const rule of selectedRules) {
+        await createRule(rule);
+      }
+      addToast(`${selectedRules.length} rules created successfully`, 'success');
+      setShowDiscoverModal(false);
+    } catch (err: unknown) {
+      addToast((err as Error).message ?? 'Failed to create rules', 'error');
+    } finally {
+      setCreatingSuggestions(false);
+    }
   };
 
   return (
@@ -94,20 +144,27 @@ export default function Connections({ addToast }: Props) {
                   <tr key={c.id}>
                     <td><span className="cell-primary">{c.name}</span></td>
                     <td>
-                      <span className={`badge ${c.type === 'postgres' ? 'badge-info' : 'badge-success'}`}>
-                        {c.type === 'postgres' ? 'PostgreSQL' : 'MongoDB'}
+                      <span className={`badge ${c.type === 'postgres' ? 'badge-info' : c.type === 'mysql' ? 'badge-warning' : 'badge-success'}`}>
+                        {c.type === 'postgres' ? 'PostgreSQL' : c.type === 'mysql' ? 'MySQL' : 'MongoDB'}
                       </span>
                     </td>
                     <td>{c.host}:{c.port}</td>
                     <td>{c.database}</td>
                     <td>{c.username}</td>
                     <td>
-                      <button
-                        className="btn btn-danger btn-icon"
-                        onClick={() => handleDelete(c.id, c.name)}
-                        title="Delete connection"
-                        id={`btn-delete-conn-${c.id}`}
-                      >✕</button>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-secondary btn-icon"
+                          onClick={() => handleDiscover(c.id)}
+                          title="Discover PII data"
+                        >🔍</button>
+                        <button
+                          className="btn btn-danger btn-icon"
+                          onClick={() => handleDelete(c.id, c.name)}
+                          title="Delete connection"
+                          id={`btn-delete-conn-${c.id}`}
+                        >✕</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -137,6 +194,7 @@ export default function Connections({ addToast }: Props) {
                   <select id="conn-type" value={form.type}
                     onChange={e => handleTypeChange(e.target.value as ConnectionCreate['type'])}>
                     <option value="postgres">PostgreSQL</option>
+                    <option value="mysql">MySQL / MariaDB</option>
                     <option value="mongodb">MongoDB</option>
                   </select>
                 </div>
@@ -178,6 +236,74 @@ export default function Connections({ addToast }: Props) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showDiscoverModal && (
+        <div className="modal-overlay" onClick={() => setShowDiscoverModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
+            <div className="modal-header">
+              <h2>Discover PII</h2>
+              <button className="modal-close" onClick={() => setShowDiscoverModal(false)}>×</button>
+            </div>
+            <div style={{ padding: '0 24px' }}>
+              {discovering ? (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  <div className="spinner" style={{ margin: '0 auto' }} />
+                  <p style={{ marginTop: 16 }}>Scanning schema for sensitive data...</p>
+                </div>
+              ) : suggestions.length === 0 ? (
+                <div className="empty-state">
+                  <p>No PII columns detected in this connection.</p>
+                </div>
+              ) : (
+                <>
+                  <p style={{ marginBottom: 16 }}>We found {suggestions.length} columns that might contain sensitive data. Select the ones you want to create masking rules for.</p>
+                  <div className="table-wrapper" style={{ maxHeight: '400px', overflow: 'auto' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 40 }}></th>
+                          <th>Table</th>
+                          <th>Column</th>
+                          <th>Suggested Strategy</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {suggestions.map((s, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <input 
+                                type="checkbox" 
+                                checked={selectedSuggestions.includes(idx)} 
+                                onChange={() => toggleSuggestion(idx)} 
+                                style={{ accentColor: 'var(--color-accent)', width: 16, height: 16 }}
+                              />
+                            </td>
+                            <td>{s.target_table}</td>
+                            <td><strong>{s.target_column}</strong></td>
+                            <td><span className="badge badge-info">{s.strategy}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowDiscoverModal(false)}>Close</button>
+              {!discovering && suggestions.length > 0 && (
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleCreateSuggestions}
+                  disabled={selectedSuggestions.length === 0 || creatingSuggestions}
+                >
+                  {creatingSuggestions ? <><span className="spinner" />Creating…</> : `Create ${selectedSuggestions.length} Rules`}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
-export type ConnectionType = 'postgres' | 'mongodb';
-export type MaskingStrategyType = 'substitution' | 'hashing' | 'redaction' | 'nullification';
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type ConnectionType = 'postgres' | 'mongodb' | 'mysql';
+export type MaskingStrategyType = 'substitution' | 'hashing' | 'redaction' | 'nullification' | 'fpe' | 'perturbation';
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unmasked';
 
 export interface Connection {
   id: string;
@@ -51,6 +51,8 @@ export interface MaskingJob {
   completed_at: string | null;
   error_message: string | null;
   records_processed: number;
+  owner_id: string;
+  shared_with: string[];
 }
 
 export interface JobCreate {
@@ -62,7 +64,6 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'user';
   picture?: string;
 }
 
@@ -77,4 +78,25 @@ export interface Summary {
   total_rules: number;
   total_jobs: number;
   total_records_processed: number;
+}
+
+export interface DynamicQueryResponse {
+  data: Record<string, unknown>[];
+  total_records: number;
+  is_masked: boolean;
+}
+
+export interface ShareJobRequest {
+  email: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  job_id: string;
+  user_id: string;
+  user_email: string;
+  user_role: string;
+  action: string;
+  is_masked: boolean;
+  timestamp: string;
 }

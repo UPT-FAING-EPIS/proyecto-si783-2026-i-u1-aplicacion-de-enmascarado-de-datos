@@ -42,6 +42,20 @@ class JobResponse(BaseModel):
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
     records_processed: int
+    shared_with: List[str] = Field(default_factory=list)
+
+class JobShareRequest(BaseModel):
+    email: EmailStr
+
+class AuditLogEntry(BaseModel):
+    id: str
+    job_id: str
+    user_id: str
+    user_email: str
+    user_role: Optional[str] = None
+    action: str
+    is_masked: bool
+    timestamp: datetime
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -58,10 +72,14 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: str
-    role: str
     picture: Optional[str] = None
 
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
+
+class DynamicQueryResponse(BaseModel):
+    data: List[Dict[str, Any]]
+    total_records: int
+    is_masked: bool
